@@ -12,6 +12,7 @@ const AddrBus SUBARU_TX_MSGS[] = {{0x122, 0}, {0x164, 0}, {0x221, 0}, {0x322, 0}
 
 // TODO: do checksum and counter checks after adding the signals to the outback dbc file
 AddrCheckStruct subaru_rx_checks[] = {
+  {.addr = { 0x40, 0x140}, .bus = 0, .expected_timestep = 10000U},
   {.addr = {0x119, 0x371}, .bus = 0, .expected_timestep = 20000U},
   {.addr = {0x240, 0x144}, .bus = 0, .expected_timestep = 50000U},
 };
@@ -21,39 +22,54 @@ int subaru_cruise_engaged_last = 0;
 int subaru_rt_torque_last = 0;
 int subaru_desired_torque_last = 0;
 uint32_t subaru_ts_last = 0;
+bool subaru_gas_last = false;
 struct sample_t subaru_torque_driver;         // last few driver torques measured
 
 static int subaru_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
-  int bus = GET_BUS(to_push);
-  int addr = GET_ADDR(to_push);
 
-  if (((addr == 0x119) || (addr == 0x371)) && (bus == 0)){
-    int bit_shift = (addr == 0x119) ? 16 : 29;
-    int torque_driver_new = ((GET_BYTES_04(to_push) >> bit_shift) & 0x7FF);
-    torque_driver_new = to_signed(torque_driver_new, 11);
-    // update array of samples
-    update_sample(&subaru_torque_driver, torque_driver_new);
-  }
+  bool valid = addr_safety_check(to_push, subaru_rx_checks, SUBARU_RX_CHECK_LEN,
+                                 NULL, NULL, NULL);
 
-  // enter controls on rising edge of ACC, exit controls on ACC off
-  if (((addr == 0x240) || (addr == 0x144)) && (bus == 0)) {
-    int bit_shift = (addr == 0x240) ? 9 : 17;
-    int cruise_engaged = ((GET_BYTES_48(to_push) >> bit_shift) & 1);
-    if (cruise_engaged && !subaru_cruise_engaged_last) {
-      controls_allowed = 1;
+  if (valid) {
+    int bus = GET_BUS(to_push);
+    int addr = GET_ADDR(to_push);
+
+    if (((addr == 0x119) || (addr == 0x371)) && (bus == 0)){
+      int bit_shift = (addr == 0x119) ? 16 : 29;
+      int torque_driver_new = ((GET_BYTES_04(to_push) >> bit_shift) & 0x7FF);
+      torque_driver_new = to_signed(torque_driver_new, 11);
+      // update array of samples
+      update_sample(&subaru_torque_driver, torque_driver_new);
     }
-    if (!cruise_engaged) {
-      controls_allowed = 0;
+
+    // enter controls on rising edge of ACC, exit controls on ACC off
+    if (((addr == 0x240) || (addr == 0x144)) && (bus == 0)) {
+      int bit_shift = (addr == 0x240) ? 9 : 17;
+      int cruise_engaged = ((GET_BYTES_48(to_push) >> bit_shift) & 1);
+      if (cruise_engaged && !subaru_cruise_engaged_last) {
+        controls_allowed = 1;
+      }
+      if (!cruise_engaged) {
+        controls_allowed = 0;
+      }
+      subaru_cruise_engaged_last = cruise_engaged;
     }
-    subaru_cruise_engaged_last = cruise_engaged;
-  }
 
-  // TODO: enforce cancellation on gas pressed
+    // exit controls on rising edge of gas press
+    if (((addr == 0x40) || (addr == 0x140)) && (bus == 0)) {
+      int byte = (addr == 0x40) ? 4 : 0;
+      bool gas = GET_BYTE(to_push, byte) != 0;
+      if (gas && !subaru_gas_last) {
+        controls_allowed = 0;
+      }
+      subaru_gas_last = gas;
+    }
 
-  if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (bus == 0) && ((addr == 0x122) || (addr == 0x164))) {
-    relay_malfunction = true;
+    if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (bus == 0) && ((addr == 0x122) || (addr == 0x164))) {
+      relay_malfunction = true;
+    }
   }
-  return 1;
+  return valid;
 }
 
 static int subaru_tx_hook(CAN_FIFOMailBox_TypeDef *to_send) {
