@@ -1,5 +1,5 @@
 // Safety-relevant steering constants for Volkswagen
-const int VOLKSWAGEN_MAX_STEER = 250;               // 2.5 Nm (EPS side max of 3.0Nm with fault if violated)
+const int VOLKSWAGEN_MAX_STEER = 300;               // 3.0 Nm (EPS side max of 3.0Nm with fault if violated)
 const int VOLKSWAGEN_MAX_RT_DELTA = 75;             // 4 max rate up * 50Hz send rate * 250000 RT interval / 1000000 = 50 ; 50 * 1.5 for safety pad = 75
 const uint32_t VOLKSWAGEN_RT_INTERVAL = 250000;     // 250ms between real time checks
 const int VOLKSWAGEN_MAX_RATE_UP = 4;               // 2.0 Nm/s RoC limit (EPS rack has own soft-limit of 5.0 Nm/s)
@@ -11,8 +11,8 @@ const int VOLKSWAGEN_DRIVER_TORQUE_FACTOR = 3;
 #define MSG_ESP_19      0x0B2   // RX from ABS, for wheel speeds
 #define MSG_EPS_01      0x09F   // RX from EPS, for driver steering torque
 #define MSG_ESP_05      0x106   // RX from ABS, for brake switch state
+#define MSG_TSK_06      0x120   // RX from ECU, for ACC status from drivetrain coordinator
 #define MSG_MOTOR_20    0x121   // RX from ECU, for driver throttle input
-#define MSG_ACC_06      0x122   // RX from ACC radar, for status and engagement
 #define MSG_HCA_01      0x126   // TX by OP, Heading Control Assist steering torque
 #define MSG_GRA_ACC_01  0x12B   // TX by OP, ACC control buttons for cancel/resume
 #define MSG_LDW_02      0x397   // TX by OP, Lane line recognition and text alerts
@@ -25,8 +25,8 @@ AddrCheckStruct volkswagen_mqb_rx_checks[] = {
   {.addr = {MSG_ESP_19},   .bus = 0, .check_checksum = false, .max_counter = 0U,  .expected_timestep = 10000U},
   {.addr = {MSG_EPS_01},   .bus = 0, .check_checksum = true,  .max_counter = 15U, .expected_timestep = 10000U},
   {.addr = {MSG_ESP_05},   .bus = 0, .check_checksum = true,  .max_counter = 15U, .expected_timestep = 20000U},
+  {.addr = {MSG_TSK_06},   .bus = 0, .check_checksum = true,  .max_counter = 15U, .expected_timestep = 20000U},
   {.addr = {MSG_MOTOR_20}, .bus = 0, .check_checksum = true,  .max_counter = 15U, .expected_timestep = 20000U},
-  {.addr = {MSG_ACC_06},   .bus = 0, .check_checksum = true,  .max_counter = 15U, .expected_timestep = 20000U},
 };
 const int VOLKSWAGEN_MQB_RX_CHECKS_LEN = sizeof(volkswagen_mqb_rx_checks) / sizeof(volkswagen_mqb_rx_checks[0]);
 
@@ -72,11 +72,11 @@ static uint8_t volkswagen_mqb_compute_crc(CAN_FIFOMailBox_TypeDef *to_push) {
     case MSG_ESP_05:
       crc ^= (uint8_t[]){0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07,0x07}[counter];
       break;
+    case MSG_TSK_06:
+      crc ^= (uint8_t[]){0xC4,0xE2,0x4F,0xE4,0xF8,0x2F,0x56,0x81,0x9F,0xE5,0x83,0x44,0x05,0x3F,0x97,0xDF}[counter];
+      break;
     case MSG_MOTOR_20:
       crc ^= (uint8_t[]){0xE9,0x65,0xAE,0x6B,0x7B,0x35,0xE5,0x5F,0x4E,0xC7,0x86,0xA2,0xBB,0xDD,0xEB,0xB4}[counter];
-      break;
-    case MSG_ACC_06:
-      crc ^= (uint8_t[]){0x37,0x7D,0xF3,0xA9,0x18,0x46,0x6D,0x4D,0x3D,0x71,0x92,0x9C,0xE5,0x32,0x10,0xB9}[counter];
       break;
     default: // Undefined CAN message, CRC check expected to fail
       break;
@@ -101,14 +101,13 @@ static int volkswagen_mqb_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
   bool valid = addr_safety_check(to_push, volkswagen_mqb_rx_checks, VOLKSWAGEN_MQB_RX_CHECKS_LEN,
                                  volkswagen_get_checksum, volkswagen_mqb_compute_crc, volkswagen_get_counter);
 
-  if (valid) {
-    int bus = GET_BUS(to_push);
+  if (valid && (GET_BUS(to_push) == 0)) {
     int addr = GET_ADDR(to_push);
 
     // Update in-motion state by sampling front wheel speeds
     // Signal: ESP_19.ESP_VL_Radgeschw_02 (front left) in scaled km/h
     // Signal: ESP_19.ESP_VR_Radgeschw_02 (front right) in scaled km/h
-    if ((bus == 0) && (addr == MSG_ESP_19)) {
+    if (addr == MSG_ESP_19) {
       int wheel_speed_fl = GET_BYTE(to_push, 4) | (GET_BYTE(to_push, 5) << 8);
       int wheel_speed_fr = GET_BYTE(to_push, 6) | (GET_BYTE(to_push, 7) << 8);
       // Check for average front speed in excess of 0.3m/s, 1.08km/h
@@ -119,7 +118,7 @@ static int volkswagen_mqb_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     // Update driver input torque samples
     // Signal: EPS_01.Driver_Strain (absolute torque)
     // Signal: EPS_01.Driver_Strain_VZ (direction)
-    if ((bus == 0) && (addr == MSG_EPS_01)) {
+    if (addr == MSG_EPS_01) {
       int torque_driver_new = GET_BYTE(to_push, 5) | ((GET_BYTE(to_push, 6) & 0x1F) << 8);
       int sign = (GET_BYTE(to_push, 6) & 0x80) >> 7;
       if (sign == 1) {
@@ -128,16 +127,16 @@ static int volkswagen_mqb_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
       update_sample(&volkswagen_torque_driver, torque_driver_new);
     }
 
-    // Update ACC status from radar for controls-allowed state
-    // Signal: ACC_06.ACC_Status_ACC
-    if ((bus == 0) && (addr == MSG_ACC_06)) {
-      int acc_status = (GET_BYTE(to_push, 7) & 0x70) >> 4;
+    // Update ACC status from drivetrain coordinator for controls-allowed state
+    // Signal: TSK_06.TSK_Status
+    if (addr == MSG_TSK_06) {
+      int acc_status = (GET_BYTE(to_push, 3) & 0x7);
       controls_allowed = ((acc_status == 3) || (acc_status == 4) || (acc_status == 5)) ? 1 : 0;
     }
 
     // Exit controls on rising edge of gas press
     // Signal: Motor_20.MO_Fahrpedalrohwert_01
-    if ((bus == 0) && (addr == MSG_MOTOR_20)) {
+    if (addr == MSG_MOTOR_20) {
       int gas = (GET_BYTES_04(to_push) >> 12) & 0xFF;
       if ((gas > 0) && (volkswagen_gas_prev == 0)) {
         controls_allowed = 0;
@@ -147,7 +146,7 @@ static int volkswagen_mqb_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
 
     // Exit controls on rising edge of brake press
     // Signal: ESP_05.ESP_Fahrer_bremst
-    if ((bus == 0) && (addr == MSG_ESP_05)) {
+    if (addr == MSG_ESP_05) {
       bool brake_pressed = (GET_BYTE(to_push, 3) & 0x4) >> 2;
       if (brake_pressed && (!(volkswagen_brake_pressed_prev) || volkswagen_moving)) {
         controls_allowed = 0;
@@ -156,7 +155,7 @@ static int volkswagen_mqb_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     }
 
     // If there are HCA messages on bus 0 not sent by OP, there's a relay problem
-    if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (bus == 0) && (addr == MSG_HCA_01)) {
+    if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (addr == MSG_HCA_01)) {
       relay_malfunction = true;
     }
   }

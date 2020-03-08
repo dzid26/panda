@@ -4,7 +4,6 @@
 #include "safety/safety_defaults.h"
 #include "safety/safety_honda.h"
 #include "safety/safety_toyota.h"
-#include "safety/safety_toyota_ipas.h"
 #include "safety/safety_bmw.h"
 #include "safety/safety_tesla.h"
 #include "safety/safety_gm_ascm.h"
@@ -15,6 +14,7 @@
 #include "safety/safety_chrysler.h"
 #include "safety/safety_subaru.h"
 #include "safety/safety_mazda.h"
+#include "safety/safety_nissan.h"
 #include "safety/safety_volkswagen.h"
 #include "safety/safety_elm327.h"
 
@@ -33,12 +33,13 @@
 #define SAFETY_SUBARU 11U
 #define SAFETY_BMW 12U
 #define SAFETY_MAZDA 13U
+#define SAFETY_NISSAN 14U
 #define SAFETY_VOLKSWAGEN_MQB 15U
-#define SAFETY_TOYOTA_IPAS 16U
 #define SAFETY_ALLOUTPUT 17U
 #define SAFETY_GM_ASCM 18U
 #define SAFETY_NOOUTPUT 19U
 #define SAFETY_HONDA_BOSCH_HARNESS 20U
+#define SAFETY_SUBARU_LEGACY 22U
 
 uint16_t current_safety_mode = SAFETY_SILENT;
 const safety_hooks *current_hooks = &nooutput_hooks;
@@ -201,14 +202,15 @@ const safety_hook_config safety_hook_registry[] = {
   {SAFETY_HYUNDAI, &hyundai_hooks},
   {SAFETY_CHRYSLER, &chrysler_hooks},
   {SAFETY_SUBARU, &subaru_hooks},
+  {SAFETY_SUBARU_LEGACY, &subaru_legacy_hooks},
   {SAFETY_MAZDA, &mazda_hooks},
   {SAFETY_VOLKSWAGEN_MQB, &volkswagen_mqb_hooks},
   {SAFETY_NOOUTPUT, &nooutput_hooks},
 #ifdef ALLOW_DEBUG
   {SAFETY_CADILLAC, &cadillac_hooks},
-  {SAFETY_TOYOTA_IPAS, &toyota_ipas_hooks},
   {SAFETY_TESLA, &tesla_hooks},
   {SAFETY_BMW, &bmw_hooks },
+  {SAFETY_NISSAN, &nissan_hooks},
   {SAFETY_ALLOUTPUT, &alloutput_hooks},
   {SAFETY_GM_ASCM, &gm_ascm_hooks},
   {SAFETY_FORD, &ford_hooks},

@@ -9,7 +9,7 @@ from panda.tests.safety.common import test_relay_malfunction, make_msg, \
 
 MAX_RATE_UP = 4
 MAX_RATE_DOWN = 10
-MAX_STEER = 250
+MAX_STEER = 300
 MAX_RT_DELTA = 75
 RT_INTERVAL = 250000
 
@@ -19,8 +19,8 @@ DRIVER_TORQUE_FACTOR = 3
 MSG_ESP_19 = 0xB2       # RX from ABS, for wheel speeds
 MSG_EPS_01 = 0x9F       # RX from EPS, for driver steering torque
 MSG_ESP_05 = 0x106      # RX from ABS, for brake light state
+MSG_TSK_06 = 0x120      # RX from ECU, for ACC status from drivetrain coordinator
 MSG_MOTOR_20 = 0x121    # RX from ECU, for driver throttle input
-MSG_ACC_06 = 0x122      # RX from ACC radar, for status and engagement
 MSG_HCA_01 = 0x126      # TX by OP, Heading Control Assist steering torque
 MSG_GRA_ACC_01 = 0x12B  # TX by OP, ACC control buttons for cancel/resume
 MSG_LDW_02 = 0x397      # TX by OP, Lane line recognition and text alerts
@@ -48,10 +48,10 @@ def volkswagen_mqb_crc(msg, addr, len_msg):
     magic_pad = b'\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5\xF5'[counter]
   elif addr == MSG_ESP_05:
     magic_pad = b'\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07\x07'[counter]
+  elif addr == MSG_TSK_06:
+    magic_pad = b'\xC4\xE2\x4F\xE4\xF8\x2F\x56\x81\x9F\xE5\x83\x44\x05\x3F\x97\xDF'[counter]
   elif addr == MSG_MOTOR_20:
     magic_pad = b'\xE9\x65\xAE\x6B\x7B\x35\xE5\x5F\x4E\xC7\x86\xA2\xBB\xDD\xEB\xB4'[counter]
-  elif addr == MSG_ACC_06:
-    magic_pad = b'\x37\x7D\xF3\xA9\x18\x46\x6D\x4D\x3D\x71\x92\x9C\xE5\x32\x10\xB9'[counter]
   elif addr == MSG_HCA_01:
     magic_pad = b'\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA\xDA'[counter]
   elif addr == MSG_GRA_ACC_01:
@@ -61,17 +61,18 @@ def volkswagen_mqb_crc(msg, addr, len_msg):
   return volkswagen_crc_8h2f(msg_bytes[1:len_msg] + magic_pad.to_bytes(1, 'little'))
 
 class TestVolkswagenMqbSafety(unittest.TestCase):
+  cnt_eps_01 = 0
+  cnt_esp_05 = 0
+  cnt_tsk_06 = 0
+  cnt_motor_20 = 0
+  cnt_hca_01 = 0
+  cnt_gra_acc_01 = 0
+
   @classmethod
   def setUp(cls):
     cls.safety = libpandasafety_py.libpandasafety
     cls.safety.set_safety_hooks(Panda.SAFETY_VOLKSWAGEN_MQB, 0)
     cls.safety.init_tests_volkswagen()
-    cls.cnt_eps_01 = 0
-    cls.cnt_esp_05 = 0
-    cls.cnt_motor_20 = 0
-    cls.cnt_acc_06 = 0
-    cls.cnt_hca_01 = 0
-    cls.cnt_gra_acc_01 = 0
 
   def _set_prev_torque(self, t):
     self.safety.set_volkswagen_desired_torque_last(t)
@@ -91,7 +92,7 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
     to_send[0].RDLR = (0x1 << 26) if brake else 0
     to_send[0].RDLR |= (self.cnt_esp_05 % 16) << 8
     to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_ESP_05, 8)
-    self.cnt_esp_05 += 1
+    self.__class__.cnt_esp_05 += 1
     return to_send
 
   # Driver steering input torque
@@ -103,7 +104,7 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
       to_send[0].RDHR |= 0x1 << 23
     to_send[0].RDLR |= (self.cnt_eps_01 % 16) << 8
     to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_EPS_01, 8)
-    self.cnt_eps_01 += 1
+    self.__class__.cnt_eps_01 += 1
     return to_send
 
   # openpilot steering output torque
@@ -115,16 +116,16 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
       to_send[0].RDLR |= 0x1 << 31
     to_send[0].RDLR |= (self.cnt_hca_01 % 16) << 8
     to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_HCA_01, 8)
-    self.cnt_hca_01 += 1
+    self.__class__.cnt_hca_01 += 1
     return to_send
 
   # ACC engagement status
-  def _acc_06_msg(self, status):
-    to_send = make_msg(0, MSG_ACC_06)
-    to_send[0].RDHR = (status & 0x7) << 28
-    to_send[0].RDLR |= (self.cnt_acc_06 % 16) << 8
-    to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_ACC_06, 8)
-    self.cnt_acc_06 += 1
+  def _tsk_06_msg(self, status):
+    to_send = make_msg(0, MSG_TSK_06)
+    to_send[0].RDLR = (status & 0x7) << 24
+    to_send[0].RDLR |= (self.cnt_tsk_06 % 16) << 8
+    to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_TSK_06, 8)
+    self.__class__.cnt_tsk_06 += 1
     return to_send
 
   # Driver throttle input
@@ -133,7 +134,7 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
     to_send[0].RDLR = (gas & 0xFF) << 12
     to_send[0].RDLR |= (self.cnt_motor_20 % 16) << 8
     to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_MOTOR_20, 8)
-    self.cnt_motor_20 += 1
+    self.__class__.cnt_motor_20 += 1
     return to_send
 
   # Cruise control buttons
@@ -142,7 +143,7 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
     to_send[0].RDLR = 1 << bit
     to_send[0].RDLR |= (self.cnt_gra_acc_01 % 16) << 8
     to_send[0].RDLR |= volkswagen_mqb_crc(to_send[0], MSG_GRA_ACC_01, 8)
-    self.cnt_gra_acc_01 += 1
+    self.__class__.cnt_gra_acc_01 += 1
     return to_send
 
   def test_spam_can_buses(self):
@@ -161,12 +162,12 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
 
   def test_enable_control_allowed_from_cruise(self):
     self.safety.set_controls_allowed(0)
-    self.safety.safety_rx_hook(self._acc_06_msg(3))
+    self.safety.safety_rx_hook(self._tsk_06_msg(3))
     self.assertTrue(self.safety.get_controls_allowed())
 
   def test_disable_control_allowed_from_cruise(self):
     self.safety.set_controls_allowed(1)
-    self.safety.safety_rx_hook(self._acc_06_msg(1))
+    self.safety.safety_rx_hook(self._tsk_06_msg(1))
     self.assertFalse(self.safety.get_controls_allowed())
 
   def test_sample_speed(self):
@@ -350,16 +351,16 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
     # TODO: Would be ideal to check ESP_19 as well, but it has no checksum
     # or counter, and I'm not sure if we can easily validate Panda's simple
     # temporal reception-rate check here.
-    for msg in [MSG_EPS_01, MSG_ESP_05, MSG_MOTOR_20, MSG_ACC_06]:
+    for msg in [MSG_EPS_01, MSG_ESP_05, MSG_TSK_06, MSG_MOTOR_20]:
       self.safety.set_controls_allowed(1)
       if msg == MSG_EPS_01:
         to_push = self._eps_01_msg(0)
       if msg == MSG_ESP_05:
         to_push = self._esp_05_msg(False)
+      if msg == MSG_TSK_06:
+        to_push = self._tsk_06_msg(3)
       if msg == MSG_MOTOR_20:
         to_push = self._motor_20_msg(0)
-      if msg == MSG_ACC_06:
-        to_push = self._acc_06_msg(3)
       self.assertTrue(self.safety.safety_rx_hook(to_push))
       to_push[0].RDHR ^= 0xFF
       self.assertFalse(self.safety.safety_rx_hook(to_push))
@@ -368,21 +369,21 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
     # counter
     # reset wrong_counters to zero by sending valid messages
     for i in range(MAX_WRONG_COUNTERS + 1):
-      self.cnt_eps_01 = 0
-      self.cnt_esp_05 = 0
-      self.cnt_motor_20 = 0
-      self.cnt_acc_06 = 0
+      self.__class__.cnt_eps_01 += 1
+      self.__class__.cnt_esp_05 += 1
+      self.__class__.cnt_tsk_06 += 1
+      self.__class__.cnt_motor_20 += 1
       if i < MAX_WRONG_COUNTERS:
         self.safety.set_controls_allowed(1)
         self.safety.safety_rx_hook(self._eps_01_msg(0))
         self.safety.safety_rx_hook(self._esp_05_msg(False))
+        self.safety.safety_rx_hook(self._tsk_06_msg(3))
         self.safety.safety_rx_hook(self._motor_20_msg(0))
-        self.safety.safety_rx_hook(self._acc_06_msg(3))
       else:
         self.assertFalse(self.safety.safety_rx_hook(self._eps_01_msg(0)))
         self.assertFalse(self.safety.safety_rx_hook(self._esp_05_msg(False)))
+        self.assertFalse(self.safety.safety_rx_hook(self._tsk_06_msg(3)))
         self.assertFalse(self.safety.safety_rx_hook(self._motor_20_msg(0)))
-        self.assertFalse(self.safety.safety_rx_hook(self._acc_06_msg(3)))
         self.assertFalse(self.safety.get_controls_allowed())
 
     # restore counters for future tests with a couple of good messages
@@ -390,8 +391,8 @@ class TestVolkswagenMqbSafety(unittest.TestCase):
       self.safety.set_controls_allowed(1)
       self.safety.safety_rx_hook(self._eps_01_msg(0))
       self.safety.safety_rx_hook(self._esp_05_msg(False))
+      self.safety.safety_rx_hook(self._tsk_06_msg(3))
       self.safety.safety_rx_hook(self._motor_20_msg(0))
-      self.safety.safety_rx_hook(self._acc_06_msg(3))
     self.assertTrue(self.safety.get_controls_allowed())
 
   def test_fwd_hook(self):

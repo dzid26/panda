@@ -5,6 +5,7 @@ const int CHRYSLER_MAX_RATE_UP = 3;
 const int CHRYSLER_MAX_RATE_DOWN = 3;
 const int CHRYSLER_MAX_TORQUE_ERROR = 80;    // max torque cmd in excess of torque motor
 const int CHRYSLER_GAS_THRSLD = 30;  // 7% more than 2m/s
+const int CHRYSLER_STANDSTILL_THRSLD = 10;  // about 1m/s
 const AddrBus CHRYSLER_TX_MSGS[] = {{571, 0}, {658, 0}, {678, 0}};
 
 // TODO: do checksum and counter checks
@@ -13,6 +14,7 @@ AddrCheckStruct chrysler_rx_checks[] = {
   {.addr = {514}, .bus = 0, .check_checksum = false, .max_counter = 0U, .expected_timestep = 10000U},
   {.addr = {500}, .bus = 0, .check_checksum = true, .max_counter = 15U, .expected_timestep = 20000U},
   {.addr = {308}, .bus = 0, .check_checksum = false, .max_counter = 15U,  .expected_timestep = 20000U},
+  {.addr = {320}, .bus = 0, .check_checksum = true, .max_counter = 15U,  .expected_timestep = 20000U},
 };
 const int CHRYSLER_RX_CHECK_LEN = sizeof(chrysler_rx_checks) / sizeof(chrysler_rx_checks[0]);
 
@@ -20,6 +22,7 @@ int chrysler_rt_torque_last = 0;
 int chrysler_desired_torque_last = 0;
 int chrysler_cruise_engaged_last = 0;
 bool chrysler_gas_prev = false;
+bool chrysler_brake_prev = false;
 int chrysler_speed = 0;
 uint32_t chrysler_ts_last = 0;
 struct sample_t chrysler_torque_meas;         // last few torques measured
@@ -73,12 +76,11 @@ static int chrysler_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
                                  chrysler_get_checksum, chrysler_compute_checksum,
                                  chrysler_get_counter);
 
-  if (valid) {
-    int bus = GET_BUS(to_push);
+  if (valid && (GET_BUS(to_push) == 0)) {
     int addr = GET_ADDR(to_push);
 
     // Measured eps torque
-    if ((addr == 544) && (bus == 0)) {
+    if (addr == 544) {
       int torque_meas_new = ((GET_BYTE(to_push, 4) & 0x7U) << 8) + GET_BYTE(to_push, 5) - 1024U;
 
       // update array of samples
@@ -86,7 +88,7 @@ static int chrysler_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     }
 
     // enter controls on rising edge of ACC, exit controls on ACC off
-    if ((addr == 500) && (bus == 0)) {
+    if (addr == 500) {
       int cruise_engaged = ((GET_BYTE(to_push, 2) & 0x38) >> 3) == 7;
       if (cruise_engaged && !chrysler_cruise_engaged_last) {
         controls_allowed = 1;
@@ -98,14 +100,14 @@ static int chrysler_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     }
 
     // update speed
-    if ((addr == 514) && (bus == 0)) {
+    if (addr == 514) {
       int speed_l = (GET_BYTE(to_push, 0) << 4) + (GET_BYTE(to_push, 1) >> 4);
       int speed_r = (GET_BYTE(to_push, 2) << 4) + (GET_BYTE(to_push, 3) >> 4);
       chrysler_speed = (speed_l + speed_r) / 2;
     }
 
     // exit controls on rising edge of gas press
-    if ((addr == 308) && (bus == 0)) {
+    if (addr == 308) {
       bool gas = (GET_BYTE(to_push, 5) & 0x7F) != 0;
       if (gas && !chrysler_gas_prev && (chrysler_speed > CHRYSLER_GAS_THRSLD)) {
         controls_allowed = 0;
@@ -113,8 +115,17 @@ static int chrysler_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
       chrysler_gas_prev = gas;
     }
 
+    // exit controls on rising edge of brake press
+    if (addr == 320) {
+      bool brake = (GET_BYTE(to_push, 0) & 0x7) == 5;
+      if (brake && (!chrysler_brake_prev || (chrysler_speed > CHRYSLER_STANDSTILL_THRSLD))) {
+        controls_allowed = 0;
+      }
+      chrysler_brake_prev = brake;
+    }
+
     // check if stock camera ECU is on bus 0
-    if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (bus == 0) && (addr == 0x292)) {
+    if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && (addr == 0x292)) {
       relay_malfunction = true;
     }
   }
