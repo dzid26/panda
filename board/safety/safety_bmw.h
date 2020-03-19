@@ -48,7 +48,7 @@ void gmlan_switch_init(int timeout_enable);
 
 int cruise_engaged_last = 0;
 
-static void bmw_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
+static int bmw_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     //set_gmlan_digital_output(ENABLED_ACTUATOR);
 
   int addr = GET_ADDR(to_push);
@@ -140,6 +140,7 @@ static void bmw_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
 
     bmw_controls_allowed_last = controls_allowed;
   }
+  return 1;
 }
 
 // all commands: gas/regen, friction brake and steering
