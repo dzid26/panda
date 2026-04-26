@@ -109,8 +109,9 @@ static void __attribute__ ((noinline)) enable_fpu(void) {
 }
 
 // go into SILENT when heartbeat isn't received for this amount of seconds.
-#define HEARTBEAT_IGNITION_CNT_ON 5U
-#define HEARTBEAT_IGNITION_CNT_OFF 2U
+// Grace is longer when openpilot is engaged (active torque commands at risk).
+#define HEARTBEAT_ENGAGED_CNT 5U
+#define HEARTBEAT_NOT_ENGAGED_CNT 2U
 
 // called at 8Hz
 static void tick_handler(void) {
@@ -212,7 +213,7 @@ static void tick_handler(void) {
 
       if (!heartbeat_disabled) {
         // if the heartbeat has been gone for a while, go to SILENT safety mode and enter power save
-        if (heartbeat_counter >= (started ? HEARTBEAT_IGNITION_CNT_ON : HEARTBEAT_IGNITION_CNT_OFF)) {
+        if (heartbeat_counter >= (heartbeat_engaged ? HEARTBEAT_ENGAGED_CNT : HEARTBEAT_NOT_ENGAGED_CNT)) {
           print("device hasn't sent a heartbeat for 0x");
           puth(heartbeat_counter);
           print(" seconds. Safety is set to SILENT mode.\n");
