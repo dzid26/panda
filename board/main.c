@@ -181,13 +181,12 @@ static void tick_handler(void) {
       uint32_t rx_per_sec = total_rx - prev_total_rx;
       prev_total_rx = total_rx;
       if (rx_per_sec >= 200U) {
-        if (!wake_can_rate) { print("wake_can_rate: ON fps="); puth(rx_per_sec); print("\n"); }
         wake_can_rate = true;
         wake_can_rate_cnt = 0U;
       } else if (wake_can_rate && (wake_can_rate_cnt > 5U)) {
-        print("wake_can_rate: OFF fps="); puth(rx_per_sec); print("\n");
         wake_can_rate = false;
       }
+      print("CAN fps="); puth(rx_per_sec); print("/200 timeout="); puth(wake_can_rate_cnt); print("/5"); print(wake_can_rate ? " [wake]\n" : "\n");
 
       // tick drivers at 1Hz
       bool started = harness_check_ignition() || ignition_can || wake_can_rate;
