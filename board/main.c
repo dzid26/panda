@@ -172,9 +172,11 @@ static void tick_handler(void) {
 
       const bool recent_heartbeat = heartbeat_counter == 0U;
 
+      can_rate_wake_tick();
+
       // tick drivers at 1Hz
-      bool started = harness_check_ignition() || ignition_can;
-      bool wake_up = started || wake_on_can;
+      bool started = harness_check_ignition() || ignition_can || wake_can_rate;
+      bool wake_up = started || wake_on_can || wake_can_rate;
       bootkick_tick(wake_up, recent_heartbeat);
 
       // increase heartbeat counter and cap it at the uint32 limit

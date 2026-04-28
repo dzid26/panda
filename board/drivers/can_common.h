@@ -13,6 +13,28 @@ uint32_t wake_on_can_cnt = 0U;
 bool ignition_can = false;
 uint32_t ignition_can_cnt = 0U;
 
+// Wake on CAN activity
+bool wake_can_rate = false;
+uint32_t wake_can_rate_cnt = 0U;
+
+void can_rate_wake_tick(void) {
+  static uint32_t prev_total_rx = 0U;
+  uint32_t total_rx = 0U;
+  for (uint8_t i = 0U; i < PANDA_CAN_CNT; i++) {
+    total_rx += can_health[i].total_rx_cnt;
+  }
+  uint32_t rx_per_sec = total_rx - prev_total_rx;
+  prev_total_rx = total_rx;
+  if (rx_per_sec >= 200U) {
+    wake_can_rate = true;
+    wake_can_rate_cnt = 0U;
+  } else if (wake_can_rate && (wake_can_rate_cnt >= 5U)) {
+    wake_can_rate = false;
+  }
+  print("CAN fps="); puth(rx_per_sec); print("/200 timeout="); puth(wake_can_rate_cnt); print("/5"); print(wake_can_rate ? " [wake]\n" : "\n");
+  wake_can_rate_cnt += 1U;
+}
+
 bool can_silent = true;
 bool can_loopback = false;
 
