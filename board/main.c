@@ -172,9 +172,26 @@ static void tick_handler(void) {
 
       const bool recent_heartbeat = heartbeat_counter == 0U;
 
+      // CAN-rate wake detection
+      static uint32_t prev_total_rx = 0U;
+      uint32_t total_rx = 0U;
+      for (uint8_t i = 0U; i < PANDA_CAN_CNT; i++) {
+        total_rx += can_health[i].total_rx_cnt;
+      }
+      uint32_t rx_per_sec = total_rx - prev_total_rx;
+      prev_total_rx = total_rx;
+      if (rx_per_sec >= 200U) {
+        if (!wake_can_rate) { print("wake_can_rate: ON fps="); puth(rx_per_sec); print("\n"); }
+        wake_can_rate = true;
+        wake_can_rate_cnt = 0U;
+      } else if (wake_can_rate && (wake_can_rate_cnt > 5U)) {
+        print("wake_can_rate: OFF fps="); puth(rx_per_sec); print("\n");
+        wake_can_rate = false;
+      }
+
       // tick drivers at 1Hz
-      bool started = harness_check_ignition() || ignition_can;
-      bool wake_up = started || wake_on_can;
+      bool started = harness_check_ignition() || ignition_can || wake_can_rate;
+      bool wake_up = started || wake_on_can || wake_can_rate;
       bootkick_tick(wake_up, recent_heartbeat);
 
       // increase heartbeat counter and cap it at the uint32 limit
@@ -264,6 +281,7 @@ static void tick_handler(void) {
       safety_mode_cnt += 1U;
       ignition_can_cnt += 1U;
       wake_on_can_cnt += 1U;
+      wake_can_rate_cnt += 1U;
 
       // synchronous safety check
       safety_tick(&current_safety_config);

@@ -8,6 +8,9 @@ uint32_t rx_buffer_overflow = 0;
 
 can_health_t can_health[PANDA_CAN_CNT] = {{0}, {0}, {0}};
 
+bool wake_can_rate = false;
+uint32_t wake_can_rate_cnt = 0U;
+
 bool can_silent = true;
 bool can_loopback = false;
 

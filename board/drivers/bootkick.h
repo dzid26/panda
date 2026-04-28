@@ -14,6 +14,10 @@ void bootkick_tick(bool ignition, bool recent_heartbeat) {
 
   if ((ignition && !bootkick_ign_prev) || harness_inserted) {
     // bootkick on rising edge of ignition or harness insertion
+    // TODO: wake_up is OR'd from multiple sources; if any source is permanently true
+    //   (e.g. Tesla's always-chatty bus → wake_can_rate stuck high), other sources
+    //   can never re-trigger bootkick. Track per-source edges or use a level signal
+    //   gated by SoM-up state.
     boot_state = BOOT_BOOTKICK;
   } else if (recent_heartbeat) {
     // disable bootkick once openpilot is up
